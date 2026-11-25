@@ -102,7 +102,9 @@ const formRules = reactive<FormRules>({
 const ratioTip = computed(() =>
   schemeType.value === FMS_CLOSING_TYPE.UNPAID_VAT
     ? '转出未交增值税的借方和贷方比例必须分别等于 100%'
-    : '借方和贷方比例必须相等，该比例同时作为本方案的计提税率'
+    : schemeType.value === FMS_CLOSING_TYPE.YEAR_END_PROFIT
+      ? '结转本年利润：借方（本年利润）和贷方（未分配利润）比例必须分别等于 100%，仅 12 月生成；亏损时系统自动借贷互换'
+      : '借方和贷方比例必须相等，该比例同时作为本方案的计提税率'
 )
 
 /** 打开弹窗 */
@@ -125,7 +127,11 @@ function addSubjectRule(direction: number = FMS_DEBIT_CREDIT_DIRECTION.DEBIT) {
     subjectId: undefined,
     digest: schemeName.value,
     direction,
-    amountRatio: schemeType.value === FMS_CLOSING_TYPE.UNPAID_VAT ? 100 : 1
+    amountRatio:
+      schemeType.value === FMS_CLOSING_TYPE.UNPAID_VAT ||
+      schemeType.value === FMS_CLOSING_TYPE.YEAR_END_PROFIT
+        ? 100
+        : 1
   })
 }
 
@@ -149,7 +155,9 @@ async function submitForm() {
     debitRatio <= 0 ||
     debitRatio > 100 ||
     Math.abs(debitRatio - creditRatio) > 0.001 ||
-    (schemeType.value === FMS_CLOSING_TYPE.UNPAID_VAT && Math.abs(debitRatio - 100) > 0.001)
+    ((schemeType.value === FMS_CLOSING_TYPE.UNPAID_VAT ||
+      schemeType.value === FMS_CLOSING_TYPE.YEAR_END_PROFIT) &&
+      Math.abs(debitRatio - 100) > 0.001)
   ) {
     message.warning(ratioTip.value)
     return

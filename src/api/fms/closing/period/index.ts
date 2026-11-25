@@ -24,6 +24,8 @@ export interface FmsClosingOverviewVO {
   balanceSheetProfitLossTransferred: boolean // 资产负债表损益是否已结转
   balanceSheetBalanced: boolean // 资产负债表是否平衡
   balanceSheetUnmappedSubjectCount: number // 资产负债表未纳入公式的科目数量
+  yearEndProfitRequired?: boolean // 是否需要年末结转本年利润（12 月）
+  yearEndProfitBalance?: number // 本年利润未结转余额
   canClose: boolean // 是否满足全部结账条件
 }
 

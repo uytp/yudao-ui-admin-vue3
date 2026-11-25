@@ -22,6 +22,9 @@ export interface FmsVoucherEntryVO {
   subjectName?: string // 科目名称
   sort?: number // 显示顺序
   assistCombinationId?: number // 辅助核算组合编号
+  currencyId?: number // 外币币别编号
+  exchangeRate?: number // 汇率
+  originalAmount?: number // 原币金额
 }
 
 /** FMS 凭证信息 */
@@ -44,6 +47,12 @@ export interface FmsVoucherVO {
   creatorUserName?: string // 制单人名称
   reviewerUserId?: number // 审核人后台用户编号
   reviewerUserName?: string // 审核人名称
+  posted?: boolean // 是否已过账（后端开启过账功能后返回）
+  posterUserId?: number // 过账人后台用户编号
+  posterUserName?: string // 过账人名称
+  postTime?: number // 过账时间
+  reversedVoucherId?: number // 冲销的原凭证编号（本凭证是红字冲销凭证时有值）
+  reversed?: boolean // 是否已被红字冲销
   createTime: Date // 创建时间
 }
 
@@ -85,6 +94,7 @@ export interface FmsVoucherPageReqVO extends PageParam {
   maxAmount?: number // 最大金额
   creatorUserId?: number // 制单人后台用户编号
   status?: number // 审核状态
+  posted?: boolean // 是否已过账
 }
 
 /** FMS 凭证整理参数 */
@@ -222,6 +232,30 @@ export const FmsVoucherApi = {
     return await request.put({
       url: '/fms/voucher/update-review-status',
       data: { accountSetId, ids, status }
+    })
+  },
+
+  // 过账或反过账凭证
+  updateVoucherPostStatus: async (accountSetId: number, ids: number[], posted: boolean) => {
+    return await request.put({
+      url: '/fms/voucher/update-post-status',
+      data: { accountSetId, ids, posted }
+    })
+  },
+
+  // 作废或恢复凭证
+  updateVoucherVoidStatus: async (accountSetId: number, ids: number[], voided: boolean) => {
+    return await request.put({
+      url: '/fms/voucher/update-void-status',
+      data: { accountSetId, ids, voided }
+    })
+  },
+
+  // 红字冲销凭证，返回冲销凭证编号
+  reverseVoucher: async (accountSetId: number, id: number) => {
+    return await request.post<number>({
+      url: '/fms/voucher/reverse',
+      data: { accountSetId, id }
     })
   },
 

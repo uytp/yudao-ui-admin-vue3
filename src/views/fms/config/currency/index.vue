@@ -42,8 +42,17 @@
         :formatter="dateFormatter"
         width="180"
       />
-      <el-table-column label="操作" align="center" width="160">
+      <el-table-column label="操作" align="center" width="220">
         <template #default="scope">
+          <el-button
+            v-if="!scope.row.standard"
+            link
+            type="primary"
+            @click="openRateDialog(scope.row)"
+            v-hasPermi="['fms:config:currency:query']"
+          >
+            <Icon icon="ep:trend-charts" />汇率表
+          </el-button>
           <el-button
             link
             type="primary"
@@ -69,6 +78,8 @@
 
   <!-- 表单弹窗：添加/修改 -->
   <FmsCurrencyForm ref="formRef" @success="getList" />
+  <!-- 汇率表 -->
+  <FmsCurrencyRateDialog ref="rateDialogRef" />
 </template>
 
 <script lang="ts" setup>
@@ -79,6 +90,7 @@ import { dateFormatter } from '@/utils/formatTime'
 import { useFmsStore } from '@/views/fms/store/fms'
 import { formatExchangeRate } from '@/views/fms/utils/format'
 import FmsCurrencyForm from './FmsCurrencyForm.vue'
+import FmsCurrencyRateDialog from './FmsCurrencyRateDialog.vue'
 
 defineOptions({ name: 'FmsCurrency' })
 
@@ -112,6 +124,13 @@ const formRef = ref<InstanceType<typeof FmsCurrencyForm>>()
 function openForm(type: string, row?: FmsCurrencyVO) {
   if (!accountSetId.value) return
   formRef.value?.open(type, accountSetId.value, row)
+}
+
+/** 打开汇率表 */
+const rateDialogRef = ref<InstanceType<typeof FmsCurrencyRateDialog>>()
+function openRateDialog(row: FmsCurrencyVO) {
+  if (!accountSetId.value) return
+  rateDialogRef.value?.open(accountSetId.value, row)
 }
 
 /** 删除币别 */

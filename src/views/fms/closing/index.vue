@@ -127,6 +127,28 @@
           :tag-label="balanceSheetCheckLabel"
         />
       </el-col>
+      <el-col v-if="postingSupported" :xs="24" :sm="12" :lg="6">
+        <ClosingStatusCard
+          title="凭证过账"
+          :value="`${unpostedVoucherCount} 张未过账`"
+          :tag-type="!overview.voucherReviewRequired || unpostedVoucherCount === 0 ? 'success' : 'danger'"
+          :tag-label="
+            !overview.voucherReviewRequired
+              ? '当前未强制过账'
+              : unpostedVoucherCount === 0
+                ? '检查通过'
+                : '请先到【查凭证】过账'
+          "
+        />
+      </el-col>
+      <el-col v-if="overview.yearEndProfitRequired" :xs="24" :sm="12" :lg="6">
+        <ClosingStatusCard
+          title="年末结转本年利润"
+          :value="overview.yearEndProfitBalance ? `未结转 ${formatMoney(overview.yearEndProfitBalance)}` : '本年利润余额为 0'"
+          :tag-type="!overview.yearEndProfitBalance ? 'success' : 'danger'"
+          :tag-label="!overview.yearEndProfitBalance ? '已转入未分配利润' : '请生成“结转本年利润（年末）”凭证'"
+        />
+      </el-col>
       <el-col :xs="24" :sm="12" :lg="6">
         <ClosingStatusCard
           title="期间状态"
@@ -174,6 +196,8 @@
 <script lang="ts" setup>
 import dayjs from 'dayjs'
 import { FmsClosingPeriodApi } from '@/api/fms/closing/period'
+import { FmsVoucherApi } from '@/api/fms/voucher'
+import { getMonthRange } from '@/utils/formatTime'
 import type { FmsClosingOverviewVO } from '@/api/fms/closing/period'
 import { FmsAccountSetApi } from '@/api/fms/config/account-set'
 import { useFmsStore } from '@/views/fms/store/fms'
@@ -194,6 +218,7 @@ const submitting = ref(false) // 结账操作的提交中
 const monthLabel = computed(() => dayjs(`${month.value}-01`).format('YYYY年MM月')) // 会计期间文本
 const currentMonthLabel = computed(() => dayjs(`${currentMonth.value}-01`).format('YYYY年MM月')) // 当前会计期间文本
 const isCurrentPeriod = computed(() => month.value === currentMonth.value) // 是否当前会计期间
+const FMS_VOUCHER_STATUS_VOIDED = 8 // 已作废凭证不计入未过账
 const overview = reactive<FmsClosingOverviewVO>({
   month: month.value,
   closed: false,
@@ -215,7 +240,13 @@ const overview = reactive<FmsClosingOverviewVO>({
 const isBeforeCurrentPeriod = computed(() =>
   dayjs(`${month.value}-01`).isBefore(dayjs(`${currentMonth.value}-01`), 'month')
 ) // 是否早于当前会计期间
-const canClose = computed(() => overview.canClose) // 是否满足后端全部结账条件
+const postingSupported = ref(false) // 后端是否已开启过账功能
+const unpostedVoucherCount = ref(0) // 本期未过账凭证数量（不含结账生成凭证）
+const canClose = computed(
+  () =>
+    overview.canClose &&
+    !(postingSupported.value && overview.voucherReviewRequired && unpostedVoucherCount.value > 0)
+) // 是否满足后端全部结账条件（含过账检查）
 const balanceSheetCheckLabel = computed(() => {
   if (!overview.balanceSheetProfitLossTransferred) return '损益未结转'
   if (overview.balanceSheetUnmappedSubjectCount > 0) {
@@ -251,8 +282,32 @@ async function getOverview() {
         month: month.value
       })
     )
+    await loadUnpostedVoucherCount()
   } finally {
     loading.value = false
+  }
+}
+
+/** 统计本期未过账凭证数量（结账生成凭证由系统生成，不需要人工过账） */
+async function loadUnpostedVoucherCount() {
+  if (!accountSetId.value || !month.value) return
+  try {
+    const [beginTime] = getMonthRange(month.value)
+    const [, endTime] = getMonthRange(month.value)
+    const page = await FmsVoucherApi.getVoucherPage({
+      accountSetId: accountSetId.value,
+      voucherTime: [beginTime, endTime],
+      pageNo: 1,
+      pageSize: 100
+    } as any)
+    const rows = (page?.list || []) as any[]
+    postingSupported.value = rows.some((row) => row.posted !== undefined && row.posted !== null)
+    unpostedVoucherCount.value = rows.filter(
+      (row) => !row.closingGenerated && !row.posted && row.status !== FMS_VOUCHER_STATUS_VOIDED
+    ).length
+  } catch {
+    postingSupported.value = false
+    unpostedVoucherCount.value = 0
   }
 }
 
@@ -311,7 +366,11 @@ async function cancelToPeriod() {
 /** 禁用账套启用前和可操作范围外的月份 */
 function disabledMonth(date: Date) {
   const selectedMonth = dayjs(date).startOf('month')
-  const latestSelectableMonth = dayjs().startOf('month')
+  // 可选上限取“今天所在月”和“当前会计期间”中较晚的一个，
+  // 否则会计期间跑到自然月之后时，已结账的期间无法选中，也就无法反结账
+  const todayMonth = dayjs().startOf('month')
+  const currentPeriodMonth = dayjs(`${currentMonth.value}-01`).startOf('month')
+  const latestSelectableMonth = currentPeriodMonth.isAfter(todayMonth) ? currentPeriodMonth : todayMonth
   return (
     selectedMonth.isBefore(dayjs(`${startMonth.value}-01`), 'month') ||
     selectedMonth.isAfter(latestSelectableMonth, 'month')

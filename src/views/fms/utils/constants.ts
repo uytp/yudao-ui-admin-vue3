@@ -85,12 +85,14 @@ export const FMS_AUXILIARY_TYPE_OPTIONS = [
 
 export const FMS_VOUCHER_STATUS = {
   PENDING_REVIEW: 0,
-  APPROVED: 1
+  APPROVED: 1,
+  VOIDED: 8
 } as const
 
 export const FMS_VOUCHER_STATUS_OPTIONS = [
   { label: '待审核', value: FMS_VOUCHER_STATUS.PENDING_REVIEW },
-  { label: '已审核', value: FMS_VOUCHER_STATUS.APPROVED }
+  { label: '已审核', value: FMS_VOUCHER_STATUS.APPROVED },
+  { label: '已作废', value: FMS_VOUCHER_STATUS.VOIDED }
 ] as const
 
 /** 凭证附件允许上传的文件类型 */
@@ -133,7 +135,8 @@ export const FMS_CLOSING_TYPE = {
   PROFIT_LOSS: 2,
   UNPAID_VAT: 3,
   LOCAL_TAX: 4,
-  INCOME_TAX: 5
+  INCOME_TAX: 5,
+  YEAR_END_PROFIT: 6
 } as const
 
 export const FMS_CLOSING_TEMPLATE_CATEGORY = {

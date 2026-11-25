@@ -85,6 +85,12 @@
           />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="postingSupported" label="过账" prop="posted">
+        <el-select v-model="queryParams.posted" clearable class="!w-240px" placeholder="请选择过账状态">
+          <el-option label="已过账" :value="true" />
+          <el-option label="未过账" :value="false" />
+        </el-select>
+      </el-form-item>
       <el-form-item>
         <el-button @click="handleQuery"><Icon icon="ep:search" class="mr-5px" /> 搜索</el-button>
         <el-button @click="resetQuery"><Icon icon="ep:refresh" class="mr-5px" /> 重置</el-button>
@@ -168,6 +174,12 @@
       >
         批量反审核
       </el-button>
+      <el-button v-if="postingSupported" @click="handleBatchPost(true)" v-hasPermi="['fms:voucher:post']">
+        批量过账
+      </el-button>
+      <el-button v-if="postingSupported" @click="handleBatchPost(false)" v-hasPermi="['fms:voucher:post']">
+        批量反过账
+      </el-button>
       <el-button type="danger" @click="handleBatchDelete" v-hasPermi="['fms:voucher:delete']">
         批量删除
       </el-button>
@@ -182,7 +194,7 @@
     >
       <el-table-column
         v-if="fmsStore.isAccountSetWritable"
-        :selectable="(row) => !row.closingGenerated"
+        :selectable="(row) => !row.closingGenerated && !isClosedPeriod(row)"
         type="selection"
         width="46"
       />
@@ -264,9 +276,18 @@
       </el-table-column>
       <el-table-column align="center" label="制单人" prop="creatorUserName" width="100" />
       <el-table-column align="center" label="审核人" prop="reviewerUserName" width="100" />
+      <el-table-column
+        v-if="postingSupported"
+        align="center"
+        label="过账人"
+        prop="posterUserName"
+        width="100"
+      />
       <el-table-column align="center" label="状态" width="90">
         <template #default="scope">
           <el-tag v-if="scope.row.closingGenerated" type="info">结账生成</el-tag>
+          <el-tag v-else-if="scope.row.status === FMS_VOUCHER_STATUS.VOIDED" type="info">已作废</el-tag>
+          <el-tag v-else-if="scope.row.posted" type="primary">已过账</el-tag>
           <el-tag
             v-else
             :type="scope.row.status === FMS_VOUCHER_STATUS.APPROVED ? 'success' : 'warning'"
@@ -275,15 +296,16 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column align="center" fixed="right" label="操作" width="250">
+      <el-table-column align="center" fixed="right" label="操作" width="320">
         <template #default="scope">
           <el-button link type="primary" @click="openVoucher(scope.row)">
-            {{ scope.row.closingGenerated || !fmsStore.isAccountSetWritable ? '查看' : '编辑' }}
+            {{ scope.row.closingGenerated || !fmsStore.isAccountSetWritable || isClosedPeriod(scope.row) || scope.row.status !== FMS_VOUCHER_STATUS.PENDING_REVIEW ? '查看' : '编辑' }}
           </el-button>
           <el-button
             v-if="
               fmsStore.isAccountSetWritable &&
               !scope.row.closingGenerated &&
+              !isClosedPeriod(scope.row) &&
               scope.row.status === FMS_VOUCHER_STATUS.PENDING_REVIEW
             "
             link
@@ -294,13 +316,58 @@
             审核
           </el-button>
           <el-button
-            v-else-if="fmsStore.isAccountSetWritable && !scope.row.closingGenerated"
+            v-else-if="fmsStore.isAccountSetWritable && !scope.row.closingGenerated && !isClosedPeriod(scope.row) && scope.row.status === FMS_VOUCHER_STATUS.APPROVED && !scope.row.posted"
             link
             type="primary"
             @click="handleReview(scope.row, FMS_VOUCHER_STATUS.PENDING_REVIEW)"
             v-hasPermi="['fms:voucher:review']"
           >
             反审核
+          </el-button>
+          <el-button
+            v-if="
+              postingSupported &&
+              fmsStore.isAccountSetWritable &&
+              !scope.row.closingGenerated &&
+              !isClosedPeriod(scope.row) &&
+              scope.row.status === FMS_VOUCHER_STATUS.APPROVED
+            "
+            link
+            type="primary"
+            @click="handlePost(scope.row, !scope.row.posted)"
+            v-hasPermi="['fms:voucher:post']"
+          >
+            {{ scope.row.posted ? '反过账' : '过账' }}
+          </el-button>
+          <el-button
+            v-if="
+              fmsStore.isAccountSetWritable &&
+              !scope.row.closingGenerated &&
+              !isClosedPeriod(scope.row) &&
+              (scope.row.status === FMS_VOUCHER_STATUS.PENDING_REVIEW ||
+                scope.row.status === FMS_VOUCHER_STATUS.VOIDED)
+            "
+            link
+            type="warning"
+            @click="handleVoid(scope.row, scope.row.status !== FMS_VOUCHER_STATUS.VOIDED)"
+            v-hasPermi="['fms:voucher:void']"
+          >
+            {{ scope.row.status === FMS_VOUCHER_STATUS.VOIDED ? '恢复' : '作废' }}
+          </el-button>
+          <el-button
+            v-if="
+              fmsStore.isAccountSetWritable &&
+              !scope.row.closingGenerated &&
+              scope.row.status === FMS_VOUCHER_STATUS.APPROVED &&
+              !scope.row.reversed &&
+              !scope.row.reversedVoucherId
+            "
+            link
+            type="danger"
+            @click="handleReverse(scope.row)"
+            v-hasPermi="['fms:voucher:reverse']"
+          >
+            冲销
           </el-button>
           <el-button
             link
@@ -314,6 +381,7 @@
             v-if="
               fmsStore.isAccountSetWritable &&
               !scope.row.closingGenerated &&
+              !isClosedPeriod(scope.row) &&
               scope.row.status !== FMS_VOUCHER_STATUS.APPROVED
             "
             link
@@ -363,8 +431,7 @@ import FmsVoucherMoveForm from './FmsVoucherMoveForm.vue'
 import FmsVoucherImportForm from './FmsVoucherImportForm.vue'
 import FmsVoucherTidyForm from './FmsVoucherTidyForm.vue'
 import UserSelect from '@/views/system/user/components/UserSelect.vue'
-import { DICT_TYPE, getIntDictOptions } from '@/utils/dict'
-import { FMS_VOUCHER_STATUS } from '@/views/fms/utils/constants'
+import { FMS_VOUCHER_STATUS, FMS_VOUCHER_STATUS_OPTIONS } from '@/views/fms/utils/constants'
 import { formatMoney } from '@/views/fms/utils/format'
 
 defineOptions({ name: 'FmsVoucherList' })
@@ -372,7 +439,7 @@ defineOptions({ name: 'FmsVoucherList' })
 const message = useMessage() // 消息弹窗
 const router = useRouter()
 const fmsStore = useFmsStore()
-const voucherStatusOptions = getIntDictOptions(DICT_TYPE.FMS_VOUCHER_STATUS)
+const voucherStatusOptions = FMS_VOUCHER_STATUS_OPTIONS // 凭证只用到“待审核、已审核”两种状态
 
 const loading = ref(false) // 列表的加载中
 const total = ref(0) // 列表的总条数
@@ -388,6 +455,13 @@ const selectedRows = ref<FmsVoucherVO[]>([]) // 选中的凭证列表
 const voucherWords = ref<FmsVoucherWordVO[]>([]) // 凭证字列表
 const subjects = ref<FmsSubjectVO[]>([]) // 会计科目树
 const monthRange = ref<string[]>([dayjs().format('YYYY-MM'), dayjs().format('YYYY-MM')]) // 凭证期间范围
+
+/** 判断凭证所在会计期间是否已结账（早于当前会计期间即已结账，只能查看） */
+function isClosedPeriod(row: FmsVoucherVO) {
+  const currentMonth = fmsStore.getCurrentMonth
+  if (!currentMonth || !row?.voucherTime) return false
+  return dayjs(row.voucherTime).format('YYYY-MM') < currentMonth
+}
 
 watch(accountSetId, () => init())
 
@@ -592,7 +666,7 @@ async function handleBatchReview(status: number) {
   const rows = selectedRows.value.filter((row) =>
     status === FMS_VOUCHER_STATUS.APPROVED
       ? row.status === FMS_VOUCHER_STATUS.PENDING_REVIEW
-      : row.status === FMS_VOUCHER_STATUS.APPROVED
+      : row.status === FMS_VOUCHER_STATUS.APPROVED && !row.posted
   )
   if (!rows.length) {
     message.warning('所选凭证不符合当前审核操作')
@@ -611,6 +685,74 @@ async function handleBatchReview(status: number) {
     )
     message.success('操作成功')
     await getList()
+  } catch {}
+}
+
+/** 后端是否已开启过账功能（凭证数据里带 posted 字段） */
+const postingSupported = computed(() =>
+  list.value.some((row) => row.posted !== undefined && row.posted !== null)
+)
+
+/** 过账或反过账凭证 */
+async function handlePost(row: FmsVoucherVO, posted: boolean) {
+  if (!accountSetId.value) return
+  try {
+    await message.confirm(posted ? '确认过账该凭证吗？' : '确认反过账该凭证吗？')
+    await FmsVoucherApi.updateVoucherPostStatus(accountSetId.value, [row.id], posted)
+    message.success('操作成功')
+    await getList()
+  } catch {}
+}
+
+/** 批量过账或反过账凭证 */
+async function handleBatchPost(posted: boolean) {
+  if (!accountSetId.value || !selectedRows.value.length) return
+  const rows = selectedRows.value.filter((row) =>
+    posted ? row.status === FMS_VOUCHER_STATUS.APPROVED && !row.posted : row.posted
+  )
+  if (!rows.length) {
+    message.warning(posted ? '所选凭证中没有“已审核且未过账”的凭证' : '所选凭证中没有已过账的凭证')
+    return
+  }
+  try {
+    await message.confirm(
+      posted ? `确认过账选中的 ${rows.length} 张凭证吗？` : `确认反过账选中的 ${rows.length} 张凭证吗？`
+    )
+    await FmsVoucherApi.updateVoucherPostStatus(
+      accountSetId.value,
+      rows.map((row) => row.id),
+      posted
+    )
+    message.success('操作成功')
+    await getList()
+  } catch {}
+}
+
+/** 作废或恢复凭证 */
+async function handleVoid(row: FmsVoucherVO, voided: boolean) {
+  if (!accountSetId.value) return
+  try {
+    await message.confirm(
+      voided
+        ? `确认作废凭证“${row.voucherWordName}-${row.voucherNumber}”吗？作废后保留凭证号，但不计入账簿和报表`
+        : `确认恢复凭证“${row.voucherWordName}-${row.voucherNumber}”吗？恢复后为待审核状态`
+    )
+    await FmsVoucherApi.updateVoucherVoidStatus(accountSetId.value, [row.id], voided)
+    message.success(voided ? '已作废' : '已恢复')
+    await getList()
+  } catch {}
+}
+
+/** 红字冲销凭证 */
+async function handleReverse(row: FmsVoucherVO) {
+  if (!accountSetId.value) return
+  try {
+    await message.confirm(
+      `确认红字冲销凭证“${row.voucherWordName}-${row.voucherNumber}”吗？系统会在当前会计期间生成一张金额为负数的冲销凭证`
+    )
+    const voucherId = await FmsVoucherApi.reverseVoucher(accountSetId.value, row.id)
+    message.success('已生成红字冲销凭证')
+    router.push({ path: '/fms/voucher/create', query: { id: voucherId } })
   } catch {}
 }
 

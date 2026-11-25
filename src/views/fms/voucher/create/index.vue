@@ -21,7 +21,9 @@
             formData.id &&
             currentAccountWritable &&
             !isApproved &&
+            !isVoided &&
             !isClosingGenerated &&
+            !isClosedPeriod &&
             checkPermi(['fms:voucher:review'])
           "
           @click="handleReview(FMS_VOUCHER_STATUS.APPROVED)"
@@ -33,7 +35,9 @@
             formData.id &&
             currentAccountWritable &&
             isApproved &&
+            !isPosted &&
             !isClosingGenerated &&
+            !isClosedPeriod &&
             checkPermi(['fms:voucher:review'])
           "
           @click="handleReview(FMS_VOUCHER_STATUS.PENDING_REVIEW)"
@@ -43,9 +47,53 @@
         <el-button
           v-if="
             formData.id &&
+            postingSupported &&
+            currentAccountWritable &&
+            isApproved &&
+            !isClosingGenerated &&
+            !isClosedPeriod &&
+            checkPermi(['fms:voucher:post'])
+          "
+          @click="handlePost(!isPosted)"
+        >
+          {{ isPosted ? '反过账' : '过账' }}
+        </el-button>
+        <el-button
+          v-if="
+            formData.id &&
+            currentAccountWritable &&
+            (detail?.status === FMS_VOUCHER_STATUS.PENDING_REVIEW || isVoided) &&
+            !isClosingGenerated &&
+            !isClosedPeriod &&
+            checkPermi(['fms:voucher:void'])
+          "
+          @click="handleVoid(!isVoided)"
+        >
+          {{ isVoided ? '恢复' : '作废' }}
+        </el-button>
+        <el-button
+          v-if="
+            formData.id &&
+            currentAccountWritable &&
+            isApproved &&
+            !isClosingGenerated &&
+            !detail?.reversed &&
+            !detail?.reversedVoucherId &&
+            checkPermi(['fms:voucher:reverse'])
+          "
+          type="danger"
+          plain
+          @click="handleReverse"
+        >
+          红字冲销
+        </el-button>
+        <el-button
+          v-if="
+            formData.id &&
             currentAccountWritable &&
             !isApproved &&
             !isClosingGenerated &&
+            !isClosedPeriod &&
             checkPermi(['fms:voucher:delete'])
           "
           @click="handleDelete"
@@ -171,6 +219,7 @@
             <col class="w-[18.5%]" />
             <col class="entry-subject-column" />
             <col v-if="showQuantityColumn" class="w-[13.9%]" />
+            <col v-if="showCurrencyColumn" class="w-[15%]" />
             <col class="w-[20.4%]" />
             <col class="w-[20.4%]" />
           </colgroup>
@@ -182,6 +231,7 @@
               <th class="entry-digest relative !px-10px">摘要</th>
               <th class="entry-subject relative !px-10px">会计科目</th>
               <th v-if="showQuantityColumn" class="!px-4px text-center">数量</th>
+              <th v-if="showCurrencyColumn" class="!px-4px text-center">外币（币别/汇率/原币）</th>
               <th class="entry-money entry-money-header relative !p-0">
                 <strong class="block h-25px leading-25px">借方金额</strong>
                 <div
@@ -378,6 +428,62 @@
                 </template>
                 <span v-else class="text-[var(--el-text-color-placeholder)]">-</span>
               </td>
+              <td v-if="showCurrencyColumn" class="entry-currency !px-4px text-center">
+                <template v-if="isForeignEntry(entry)">
+                  <div v-if="readOnly" class="text-12px leading-20px">
+                    <div>{{ getCurrencyName(entry.currencyId) }}</div>
+                    <div>汇率 {{ formatExchangeRate(entry.exchangeRate) }}</div>
+                    <div>原币 {{ formatAmount(entry.originalAmount) }}</div>
+                  </div>
+                  <template v-else>
+                    <div
+                      class="my-2px flex items-center justify-center gap-4px whitespace-nowrap text-12px"
+                    >
+                      <span>币别</span>
+                      <el-select
+                        v-model="entry.currencyId"
+                        size="small"
+                        class="!w-90px"
+                        placeholder="币别"
+                        @change="handleCurrencyChange(entry)"
+                      >
+                        <el-option
+                          v-for="currencyId in getSubject(entry.subjectId)?.currencyIds || []"
+                          :key="currencyId"
+                          :label="getCurrencyName(currencyId)"
+                          :value="currencyId"
+                        />
+                      </el-select>
+                    </div>
+                    <div
+                      class="my-2px flex items-center justify-center gap-4px whitespace-nowrap text-12px [&_.el-input-number]:!w-90px"
+                    >
+                      <span>汇率</span>
+                      <el-input-number
+                        v-model="entry.exchangeRate"
+                        size="small"
+                        :controls="false"
+                        :min="0"
+                        :precision="6"
+                        @change="calculateCurrencyAmount(entry)"
+                      />
+                    </div>
+                    <div
+                      class="my-2px flex items-center justify-center gap-4px whitespace-nowrap text-12px [&_.el-input-number]:!w-90px"
+                    >
+                      <span>原币</span>
+                      <el-input-number
+                        v-model="entry.originalAmount"
+                        size="small"
+                        :controls="false"
+                        :precision="2"
+                        @change="calculateCurrencyAmount(entry)"
+                      />
+                    </div>
+                  </template>
+                </template>
+                <span v-else class="text-[var(--el-text-color-placeholder)]">-</span>
+              </td>
               <td class="entry-money relative !p-0" data-entry-money data-entry-direction="debit">
                 <div class="money-editor relative h-60px">
                   <el-input-number
@@ -427,7 +533,7 @@
           <tfoot>
             <tr>
               <td class="entry-operation"></td>
-              <td :colspan="showQuantityColumn ? 3 : 2" class="font-600">
+              <td :colspan="(showQuantityColumn ? 3 : 2) + (showCurrencyColumn ? 1 : 0)" class="font-600">
                 合计：{{ amountInWords }}
                 <span v-if="!balanced" class="ml-16px text-[var(--el-color-danger)]">
                   借贷不平衡
@@ -464,17 +570,32 @@
         <span>制单人：{{ creatorUserName }}</span>
         <template v-if="formData.id">
           <span>审核人：{{ detail?.reviewerUserName || '-' }}</span>
-          <el-tag :type="isApproved ? 'success' : 'warning'">
+          <el-tag v-if="isVoided" type="info">已作废</el-tag>
+          <el-tag v-else :type="isApproved ? 'success' : 'warning'">
             {{ isApproved ? '已审核' : '待审核' }}
           </el-tag>
+          <el-tag v-if="detail?.reversedVoucherId" type="danger">红字冲销凭证</el-tag>
+          <el-tag v-if="detail?.reversed" type="danger" effect="plain">已被冲销</el-tag>
+          <template v-if="postingSupported && !isClosingGenerated">
+            <span>过账人：{{ detail?.posterUserName || '-' }}</span>
+            <el-tag :type="isPosted ? 'primary' : 'info'">
+              {{ isPosted ? '已过账' : '未过账' }}
+            </el-tag>
+          </template>
           <el-tag v-if="isClosingGenerated" type="info">结账生成凭证</el-tag>
         </template>
+      </div>
+      <div
+        v-if="isVoided"
+        class="pointer-events-none absolute right-[25%] top-12px z-3 rotate-[-12deg] rounded-[50%] border-3 border-[var(--el-color-info)] border-double px-14px py-10px text-20px font-700 tracking-4px text-[var(--el-color-info)] opacity-72"
+      >
+        已作废
       </div>
       <div
         v-if="isApproved"
         class="pointer-events-none absolute right-[25%] top-12px z-3 rotate-[-12deg] rounded-[50%] border-3 border-[var(--el-color-danger)] border-double px-14px py-10px text-20px font-700 tracking-4px text-[var(--el-color-danger)] opacity-72"
       >
-        审核通过
+        {{ isPosted ? '已过账' : '审核通过' }}
       </div>
     </div>
     <div v-if="canSave" class="mt-16px flex justify-end">
@@ -509,6 +630,9 @@ import type { FmsVoucherTemplateVO } from '@/api/fms/config/voucher-template'
 import { FmsVoucherWordApi } from '@/api/fms/config/voucher-word'
 import type { FmsVoucherWordVO } from '@/api/fms/config/voucher-word'
 import { FmsVoucherApi } from '@/api/fms/voucher'
+import { FmsCurrencyApi } from '@/api/fms/config/currency'
+import type { FmsCurrencyVO } from '@/api/fms/config/currency'
+import { FmsForeignCurrencyApi } from '@/api/fms/foreign-currency'
 import type {
   FmsVoucherAuxiliaryItemVO,
   FmsVoucherSaveReqVO,
@@ -527,6 +651,8 @@ import {
 } from '@/views/fms/utils/constants'
 import {
   formatPeriodLabel,
+  formatAmount,
+  formatExchangeRate,
   formatSubjectBalance as formatSubjectBalanceText,
   formatSubjectDisplay,
   formatUppercaseMoney
@@ -580,6 +706,8 @@ const formData = reactive({
   attachmentCount: 0
 }) // 凭证表单数据
 const entries = ref<VoucherEntryForm[]>([]) // 凭证分录列表
+const currencies = ref<FmsCurrencyVO[]>([]) // 币别列表
+const monthRates = reactive(new Map<number, number>()) // 凭证期间的外币汇率 Map
 const templateSaveFormRef = ref<InstanceType<typeof FmsVoucherTemplateSaveForm>>() // 凭证模板保存表单 Ref
 const templateSelectRef = ref<InstanceType<typeof FmsVoucherTemplateSelect>>() // 凭证模板选择器 Ref
 const digestLibraryRef = ref<InstanceType<typeof FmsDigestLibrary>>() // 常用摘要库 Ref
@@ -603,7 +731,18 @@ const subjectBalanceMap = computed(
   () => new Map(subjectBalances.value.map((item) => [item.subjectId, item]))
 ) // 科目余额 Map
 const isApproved = computed(() => detail.value?.status === FMS_VOUCHER_STATUS.APPROVED) // 凭证是否已审核
+const isVoided = computed(() => detail.value?.status === FMS_VOUCHER_STATUS.VOIDED) // 凭证是否已作废
 const isClosingGenerated = computed(() => Boolean(detail.value?.closingGenerated)) // 是否为结账生成凭证
+const postingSupported = computed(
+  () => detail.value?.posted !== undefined && detail.value?.posted !== null
+) // 后端是否已开启过账功能
+const isPosted = computed(() => Boolean(detail.value?.posted)) // 凭证是否已过账
+const isClosedPeriod = computed(
+  () =>
+    Boolean(detail.value?.voucherTime) &&
+    Boolean(currentMonth.value) &&
+    dayjs(detail.value!.voucherTime).format('YYYY-MM') < currentMonth.value
+) // 凭证所在会计期间是否已结账（已结账期间只能查看）
 const currentAccountWritable = computed(
   () =>
     fmsStore.getAccountSet?.level === FmsAccountUserLevelEnum.OWNER ||
@@ -613,7 +752,9 @@ const savePermission = computed(() => (formData.id ? 'fms:voucher:update' : 'fms
 const readOnly = computed(
   () =>
     isApproved.value ||
+    isVoided.value ||
     isClosingGenerated.value ||
+    isClosedPeriod.value ||
     !currentAccountWritable.value ||
     !checkPermi([savePermission.value])
 ) // 是否只读
@@ -645,6 +786,7 @@ const voucherPeriod = computed(() => {
 const showQuantityColumn = computed(() =>
   entries.value.some((entry) => Boolean(getSubject(entry.subjectId)?.quantityAccounting))
 ) // 是否显示数量列
+const showCurrencyColumn = computed(() => entries.value.some((entry) => isForeignEntry(entry))) // 是否显示外币列
 const creatorUserName = computed(
   () => detail.value?.creatorUserName || userStore.getUser.nickname || ''
 ) // 制单人名称
@@ -669,6 +811,7 @@ async function init() {
       FmsAuxiliaryTypeApi.getAuxiliaryTypeSimpleList(currentAccountSetId),
       fmsStore.loadCurrentMonth()
     ])
+    currencies.value = await FmsCurrencyApi.getCurrencySimpleList(currentAccountSetId)
     voucherWords.value = wordList
     subjects.value = handleTree(subjectList)
     auxiliaryTypes.value = auxiliaryTypeList
@@ -782,10 +925,59 @@ async function handleVoucherDateChange() {
 async function loadSubjectBalances(month: string) {
   const currentAccountSetId = accountSetId.value
   if (!currentAccountSetId || !month) return
-  subjectBalances.value = await FmsVoucherApi.getVoucherSubjectBalanceList(
-    currentAccountSetId,
-    month
-  )
+  const [balances, rates] = await Promise.all([
+    FmsVoucherApi.getVoucherSubjectBalanceList(currentAccountSetId, month),
+    FmsForeignCurrencyApi.getMonthRateList(currentAccountSetId, month).catch(() => [])
+  ])
+  subjectBalances.value = balances
+  monthRates.clear()
+  rates.forEach((rate) => monthRates.set(rate.currencyId, Number(rate.rate)))
+}
+
+/** 是否为启用外币核算的分录 */
+function isForeignEntry(entry: VoucherEntryForm) {
+  return Boolean(getSubject(entry.subjectId)?.currencyIds?.length)
+}
+
+/** 获得币别名称 */
+function getCurrencyName(currencyId?: number) {
+  const currency = currencies.value.find((item) => item.id === currencyId)
+  return currency ? `${currency.code} ${currency.name}` : ''
+}
+
+/** 切换币别：带出凭证期间的汇率并重算本位币 */
+function handleCurrencyChange(entry: VoucherEntryForm) {
+  if (!entry.currencyId) return
+  const currency = currencies.value.find((item) => item.id === entry.currencyId)
+  entry.exchangeRate = monthRates.get(entry.currencyId) || currency?.exchangeRate
+  calculateCurrencyAmount(entry)
+}
+
+/** 计算外币原币 × 汇率 */
+function getCurrencyAmount(entry: VoucherEntryForm) {
+  const original = Number(entry.originalAmount || 0)
+  const rate = Number(entry.exchangeRate || 0)
+  if (!original || !rate) return undefined
+  return (Math.sign(original) * Math.round(Math.abs(original) * rate * 100)) / 100
+}
+
+/** 原币或汇率变化：本位币 = 原币 × 汇率，借贷方向沿用已填写的一侧 */
+function calculateCurrencyAmount(entry: VoucherEntryForm) {
+  const amount = getCurrencyAmount(entry)
+  if (amount === undefined) return
+  const credit =
+    entry.creditAmount !== undefined && entry.creditAmount !== null
+      ? true
+      : entry.debitAmount !== undefined && entry.debitAmount !== null
+        ? false
+        : getSubject(entry.subjectId)?.balanceDirection === FMS_DEBIT_CREDIT_DIRECTION.CREDIT
+  if (credit) {
+    entry.creditAmount = amount
+    entry.debitAmount = undefined
+  } else {
+    entry.debitAmount = amount
+    entry.creditAmount = undefined
+  }
 }
 
 /** 获得默认凭证日期 */
@@ -863,6 +1055,10 @@ async function handleSubjectChange(entry: VoucherEntryForm) {
   entry.quantity = undefined
   entry.unitPrice = undefined
   const subject = getSubject(entry.subjectId)
+  entry.currencyId = subject?.currencyIds?.length ? subject.currencyIds[0] : undefined
+  entry.exchangeRate = undefined
+  entry.originalAmount = undefined
+  if (entry.currencyId) handleCurrencyChange(entry)
   entry.auxiliaries = (subject?.auxiliaryTypeIds || []).map((auxiliaryTypeId) => ({
     type: auxiliaryTypeMap.value.get(auxiliaryTypeId)?.type,
     typeId: auxiliaryTypeId
@@ -1028,6 +1224,12 @@ function handleEntryAmountChange(entry: VoucherEntryForm, direction: 'debit' | '
     entry.creditAmount = undefined
   } else if (direction === 'credit' && entry.creditAmount !== undefined) {
     entry.debitAmount = undefined
+  }
+  // 外币分录：本位币金额跟随 原币 × 汇率，超过 0.01 尾差时自动纠正
+  const amount = isForeignEntry(entry) ? getCurrencyAmount(entry) : undefined
+  const field = direction === 'debit' ? 'debitAmount' : 'creditAmount'
+  if (amount !== undefined && entry[field] !== undefined && entry[field] !== null) {
+    if (Math.abs(Number(entry[field]) - amount) > 0.01) entry[field] = amount
   }
 }
 
@@ -1199,9 +1401,13 @@ function buildTemplateEntries(): FmsVoucherEntryVO[] | undefined {
 
 /** 构建凭证业务分录 */
 function buildVoucherEntry(entry: VoucherEntryForm): FmsVoucherEntryVO {
+  const foreign = isForeignEntry(entry)
   return {
     ...entry,
     subjectId: entry.subjectId!,
+    currencyId: foreign ? entry.currencyId : undefined,
+    exchangeRate: foreign ? entry.exchangeRate : undefined,
+    originalAmount: foreign ? Number(entry.originalAmount || 0) : undefined,
     auxiliaries: buildEntryAuxiliaries(entry)
   }
 }
@@ -1215,6 +1421,7 @@ function isEntryEmpty(entry: VoucherEntryForm) {
     entry.unitPrice ||
     entry.debitAmount ||
     entry.creditAmount ||
+    entry.originalAmount ||
     entry.auxiliaries.some((item) => item.itemId)
   )
 }
@@ -1243,6 +1450,18 @@ function validateEntry(entry: VoucherEntryForm, amountRequired: boolean) {
   if (amountRequired && debitAmount === 0 && creditAmount === 0) {
     message.warning('请填写每条分录的借方或贷方金额')
     return false
+  }
+  if (subject.currencyIds?.length && amountRequired) {
+    if (!entry.currencyId || !Number(entry.exchangeRate)) {
+      message.warning(`“${subject.name}”启用了外币核算，请选择币别并填写汇率`)
+      return false
+    }
+    const currencyAmount = getCurrencyAmount(entry)
+    const amount = debitAmount || creditAmount
+    if (currencyAmount !== undefined && Math.abs(currencyAmount - amount) > 0.01) {
+      message.warning(`“${subject.name}”的本位币金额应等于 原币 × 汇率`)
+      return false
+    }
   }
   const auxiliaryTypeIds = subject.auxiliaryTypeIds || []
   if (
@@ -1344,6 +1563,43 @@ async function handleReview(status: number) {
     await FmsVoucherApi.updateVoucherReviewStatus(accountSetId.value, [formData.id], status)
     message.success('操作成功')
     await loadDetail(formData.id)
+  } catch {}
+}
+
+/** 过账或反过账凭证 */
+async function handlePost(posted: boolean) {
+  if (!accountSetId.value || !formData.id) return
+  try {
+    await message.confirm(posted ? '确认过账该凭证吗？' : '确认反过账该凭证吗？')
+    await FmsVoucherApi.updateVoucherPostStatus(accountSetId.value, [formData.id], posted)
+    message.success('操作成功')
+    await loadDetail(formData.id)
+  } catch {}
+}
+
+/** 作废或恢复凭证 */
+async function handleVoid(voided: boolean) {
+  if (!accountSetId.value || !formData.id) return
+  try {
+    await message.confirm(
+      voided
+        ? '确认作废该凭证吗？作废后保留凭证号，但不计入账簿和报表'
+        : '确认恢复该凭证吗？恢复后为待审核状态'
+    )
+    await FmsVoucherApi.updateVoucherVoidStatus(accountSetId.value, [formData.id], voided)
+    message.success(voided ? '已作废' : '已恢复')
+    await loadDetail(formData.id)
+  } catch {}
+}
+
+/** 红字冲销凭证 */
+async function handleReverse() {
+  if (!accountSetId.value || !formData.id) return
+  try {
+    await message.confirm('确认红字冲销该凭证吗？系统会在当前会计期间生成一张金额为负数的冲销凭证')
+    const voucherId = await FmsVoucherApi.reverseVoucher(accountSetId.value, formData.id)
+    message.success('已生成红字冲销凭证')
+    await router.push({ path: '/fms/voucher/create', query: { id: voucherId } })
   } catch {}
 }
 

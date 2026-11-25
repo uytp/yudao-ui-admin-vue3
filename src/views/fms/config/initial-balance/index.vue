@@ -34,6 +34,14 @@
           试算平衡
         </el-button>
         <el-button
+          type="primary"
+          plain
+          @click="openCurrencyBalance"
+          v-hasPermi="['fms:config:initial-balance:query']"
+        >
+          <Icon icon="ep:money" class="mr-5px" /> 外币期初
+        </el-button>
+        <el-button
           v-if="editable && fmsStore.isAccountSetWritable"
           type="warning"
           plain
@@ -247,6 +255,7 @@
   <FmsInitialAssistForm ref="assistFormRef" @success="addAssist" />
   <FmsInitialBalanceImportForm ref="importFormRef" @success="loadPage" />
   <FmsTrialBalanceDialog ref="trialBalanceRef" />
+  <FmsInitialCurrencyBalanceDialog ref="currencyBalanceRef" @success="loadPage" />
 </template>
 
 <script lang="ts" setup>
@@ -270,6 +279,7 @@ import { ElInputNumber } from 'element-plus'
 import FmsInitialAssistForm from './FmsInitialAssistForm.vue'
 import FmsInitialBalanceImportForm from './FmsInitialBalanceImportForm.vue'
 import FmsTrialBalanceDialog from './FmsTrialBalanceDialog.vue'
+import FmsInitialCurrencyBalanceDialog from './FmsInitialCurrencyBalanceDialog.vue'
 
 defineOptions({ name: 'FmsInitialBalance' })
 
@@ -343,6 +353,17 @@ const assistSubject = ref<ViewRow>() // 正在添加辅助核算明细的科目
 const assistFormRef = ref<InstanceType<typeof FmsInitialAssistForm>>()
 const importFormRef = ref<InstanceType<typeof FmsInitialBalanceImportForm>>()
 const trialBalanceRef = ref<InstanceType<typeof FmsTrialBalanceDialog>>()
+const currencyBalanceRef = ref<InstanceType<typeof FmsInitialCurrencyBalanceDialog>>()
+
+/** 打开外币期初 */
+function openCurrencyBalance() {
+  if (!accountSetId.value) return
+  if (edited.value) {
+    message.warning('当前修改尚未保存，请先保存期初余额')
+    return
+  }
+  currencyBalanceRef.value?.open(accountSetId.value, editable.value && fmsStore.isAccountSetWritable)
+}
 const accountSetId = computed(() => fmsStore.getAccountSetId) // 当前账套编号
 const isJanuary = computed(
   () => !!accountStartTime.value && new Date(accountStartTime.value).getMonth() === 0
