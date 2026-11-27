@@ -14,8 +14,8 @@
           class="!w-280px"
         />
       </el-form-item>
-      <el-form-item label="未生成凭证">
-        <el-switch v-model="includeDraft" active-text="包含草稿" inactive-text="只看已生成" />
+      <el-form-item label="成本单范围" label-width="96px">
+        <el-switch v-model="includeDraft" active-text="包含草稿" inactive-text="只看已生成凭证" />
       </el-form-item>
       <el-form-item>
         <el-button type="primary" @click="loadReport"><Icon icon="ep:search" class="mr-5px" /> 查询</el-button>
