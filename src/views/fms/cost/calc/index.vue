@@ -162,6 +162,16 @@ const loading = ref(false)
 const calculating = ref(false)
 const settingRef = ref<InstanceType<typeof CostSettingDialog>>()
 const period = ref<string>(fmsStore.getCurrentMonth || dayjs().format('YYYY-MM'))
+// 当前会计期间加载完成后（或切换账套后），默认选中当前会计期间
+watch(() => fmsStore.getCurrentMonth, (month) => {
+  if (month) period.value = month
+})
+onMounted(async () => {
+  // 直接打开本页时 store 里可能还没有会计期间，主动加载一次
+  if (!fmsStore.getCurrentMonth && accountSetId.value) {
+    await fmsStore.loadCurrentMonth()
+  }
+})
 const setting = ref<Partial<FmsCostSettingVO>>({ overheadAllocMethod: 1, wipMethod: 0 })
 const sheet = ref<FmsCostSheetVO>(emptySheet())
 const rows = computed(() => sheet.value.items)
