@@ -38,6 +38,25 @@
           <Icon icon="ep:refresh-left" class="mr-5px" /> 撤销凭证
         </el-button>
       </el-form-item>
+      <el-form-item v-if="!generated" label="添加产品" label-width="80px">
+        <el-select
+          v-model="addProductId"
+          filterable
+          clearable
+          class="!w-220px"
+          placeholder="选择产品，加到下表"
+          @focus="loadProductOptions"
+          @change="handleAddProduct"
+        >
+          <el-option
+            v-for="p in productOptions"
+            :key="p.id"
+            :label="`${p.code} ${p.name}`"
+            :value="p.id"
+            :disabled="rows.some((r) => r.productItemId === p.id)"
+          />
+        </el-select>
+      </el-form-item>
     </el-form>
   </ContentWrap>
 
@@ -116,13 +135,31 @@
       </el-table-column>
 
       <el-table-column label="期初结转" align="center">
-        <el-table-column label="期初在产品" align="right" width="110">
+        <el-table-column v-if="setting.wipMethod === 1" label="期初在产品-材料" width="130">
           <template #default="{ row }">
-            {{ formatAmount((row.beginWipMaterial || 0) + (row.beginWipLabor || 0) + (row.beginWipOverhead || 0)) }}
+            <el-input-number v-model="row.beginWipMaterial" :disabled="beginLocked(row)" :min="0" :precision="2" :controls="false" class="!w-full" />
           </template>
         </el-table-column>
-        <el-table-column label="期初库存数量" prop="beginStockQty" align="right" width="110" :formatter="qty" />
-        <el-table-column label="期初库存金额" prop="beginStockAmount" align="right" width="110" :formatter="money" />
+        <el-table-column v-if="setting.wipMethod === 1" label="期初在产品-人工" width="130">
+          <template #default="{ row }">
+            <el-input-number v-model="row.beginWipLabor" :disabled="beginLocked(row)" :min="0" :precision="2" :controls="false" class="!w-full" />
+          </template>
+        </el-table-column>
+        <el-table-column v-if="setting.wipMethod === 1" label="期初在产品-费用" width="130">
+          <template #default="{ row }">
+            <el-input-number v-model="row.beginWipOverhead" :disabled="beginLocked(row)" :min="0" :precision="2" :controls="false" class="!w-full" />
+          </template>
+        </el-table-column>
+        <el-table-column label="期初库存数量" width="120">
+          <template #default="{ row }">
+            <el-input-number v-model="row.beginStockQty" :disabled="beginLocked(row)" :min="0" :precision="4" :controls="false" class="!w-full" />
+          </template>
+        </el-table-column>
+        <el-table-column label="期初库存金额" width="120">
+          <template #default="{ row }">
+            <el-input-number v-model="row.beginStockAmount" :disabled="beginLocked(row)" :min="0" :precision="2" :controls="false" class="!w-full" />
+          </template>
+        </el-table-column>
       </el-table-column>
 
       <el-table-column label="完工产品成本" align="center">
@@ -144,6 +181,13 @@
         <el-table-column label="期末库存数量" prop="endStockQty" align="right" width="110" :formatter="qty" />
         <el-table-column label="期末库存金额" prop="endStockAmount" align="right" width="120" :formatter="money" />
       </el-table-column>
+
+      <el-table-column v-if="!generated" label="操作" width="80" align="center" fixed="right">
+        <template #default="{ row }">
+          <el-button v-if="isEmptyRow(row)" link type="danger" @click="handleRemoveRow(row)">移除</el-button>
+          <span v-else class="text-[var(--el-text-color-placeholder)]">-</span>
+        </template>
+      </el-table-column>
     </el-table>
   </ContentWrap>
 
@@ -154,6 +198,7 @@
 import { FmsCostApi } from '@/api/fms/cost'
 import type { FmsCostSettingVO, FmsCostSheetItemVO, FmsCostSheetVO } from '@/api/fms/cost'
 import { FMS_COST_SHEET_STATUS } from '@/api/fms/cost'
+import { FmsAuxiliaryItemApi } from '@/api/fms/config/auxiliary/item'
 import { useFmsStore } from '@/views/fms/store/fms'
 import { formatAmount } from '@/views/fms/utils/format'
 import CostSettingDialog from './CostSettingDialog.vue'
@@ -242,13 +287,80 @@ async function handleCalculate() {
       workHours: r.workHours,
       wipQty: r.wipQty,
       wipProgress: r.wipProgress,
-      salesQty: r.salesQty
+      salesQty: r.salesQty,
+      // 期初数：上月带入的由后端决定，这里提交的值只对“第一次使用 / 新产品”有效
+      beginWipMaterial: r.beginWipMaterial,
+      beginWipLabor: r.beginWipLabor,
+      beginWipOverhead: r.beginWipOverhead,
+      beginStockQty: r.beginStockQty,
+      beginStockAmount: r.beginStockAmount
     }))
-    sheet.value = await FmsCostApi.calculate({ accountSetId: accountSetId.value, period: period.value, items })
+    const removeIds = pendingRemoveIds.value
+    pendingRemoveIds.value = []
+    sheet.value = await FmsCostApi.calculate({
+      accountSetId: accountSetId.value,
+      period: period.value,
+      items: items.filter((i) => !removeIds.includes(i.productItemId)),
+      removeProductItemIds: removeIds
+    })
     message.success('计算完成')
   } finally {
     calculating.value = false
   }
+}
+
+/** 待移除的产品行（点【移除】后先从表格里去掉，再点【计算成本】才真正生效） */
+const pendingRemoveIds = ref<number[]>([])
+
+/** 期初数是否被锁定：已生成凭证，或者期初由上月带入 */
+function beginLocked(row: FmsCostSheetItemVO) {
+  return generated.value || !!row.beginCarried
+}
+
+/** 一行有没有任何数据：没有就可以移除 */
+function isEmptyRow(row: FmsCostSheetItemVO) {
+  return !row.beginCarried && !Number(row.curMaterial || 0) && !Number(row.curLabor || 0)
+}
+
+/** 移除一个空产品行 */
+function handleRemoveRow(row: FmsCostSheetItemVO) {
+  pendingRemoveIds.value.push(row.productItemId)
+  sheet.value.items = sheet.value.items.filter((r) => r.productItemId !== row.productItemId)
+}
+
+/** 可添加的产品（辅助核算类别里的项目），第一次点开下拉时才加载 */
+const addProductId = ref<number>()
+const productOptions = ref<{ id: number; code: string; name: string; unit?: string }[]>([])
+async function loadProductOptions() {
+  if (productOptions.value.length > 0 || !accountSetId.value) return
+  if (!setting.value.productAuxTypeId) {
+    message.warning('请先在【成本参数】里选好产品对应的辅助核算类别')
+    return
+  }
+  productOptions.value = (await FmsAuxiliaryItemApi.getAuxiliaryItemSimpleList(
+    accountSetId.value,
+    setting.value.productAuxTypeId
+  )) as any
+}
+
+/** 把选中的产品加成一行空数据；期初可以手工录，其它数字等计算后出来 */
+function handleAddProduct(id?: number) {
+  if (!id) return
+  const p = productOptions.value.find((o) => o.id === id)
+  addProductId.value = undefined
+  if (!p || sheet.value.items.some((r) => r.productItemId === id)) return
+  // 之前点过【移除】又重新添加：取消待移除
+  pendingRemoveIds.value = pendingRemoveIds.value.filter((x) => x !== id)
+  sheet.value.items = [
+    ...sheet.value.items,
+    {
+      productItemId: id, productCode: p.code, productName: p.name, unit: p.unit,
+      workHours: 0, completedQty: 0, wipQty: 0, wipProgress: 100, salesQty: 0,
+      beginWipMaterial: 0, beginWipLabor: 0, beginWipOverhead: 0, beginStockQty: 0, beginStockAmount: 0,
+      beginCarried: false
+    }
+  ]
+  message.success(`已添加【${p.name}】，填好数据后点【计算成本】`)
 }
 
 /** 生成三张成本凭证 */

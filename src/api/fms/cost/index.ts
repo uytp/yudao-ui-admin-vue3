@@ -32,6 +32,8 @@ export interface FmsCostSheetItemVO {
   beginWipOverhead?: number
   beginStockQty?: number
   beginStockAmount?: number
+  /** 期初数是否由上月成本单带入（true 时期初数不能手工改） */
+  beginCarried?: boolean
   // 计算结果
   curMaterial?: number
   curLabor?: number
@@ -83,7 +85,12 @@ export const FmsCostApi = {
   },
 
   // 计算某月成本
-  calculate: async (data: { accountSetId: number; period: string; items?: FmsCostSheetItemVO[] }) => {
+  calculate: async (data: {
+    accountSetId: number
+    period: string
+    items?: FmsCostSheetItemVO[]
+    removeProductItemIds?: number[]
+  }) => {
     return await request.post<FmsCostSheetVO>({ url: '/fms/cost/sheet/calculate', data })
   },
 
