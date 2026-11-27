@@ -19,7 +19,9 @@
       </el-form-item>
       <el-form-item>
         <el-button type="primary" @click="loadReport"><Icon icon="ep:search" class="mr-5px" /> 查询</el-button>
-        <el-button @click="handleExport"><Icon icon="ep:download" class="mr-5px" /> 导出 CSV</el-button>
+        <el-button :disabled="activeTab === 'charts'" @click="handleExport">
+          <Icon icon="ep:download" class="mr-5px" /> 导出 CSV
+        </el-button>
       </el-form-item>
     </el-form>
   </ContentWrap>
@@ -94,6 +96,10 @@
           <el-table-column label="期末库存金额" prop="endStockAmount" align="right" width="120" :formatter="money" />
         </el-table>
       </el-tab-pane>
+
+      <el-tab-pane label="图表" name="charts" lazy>
+        <CostReportCharts v-if="report" :report="report" />
+      </el-tab-pane>
     </el-tabs>
   </ContentWrap>
 </template>
@@ -101,6 +107,7 @@
 <script lang="ts" setup>
 import { FmsCostReportApi } from '@/api/fms/cost/report'
 import type { FmsCostReportRowVO, FmsCostReportVO } from '@/api/fms/cost/report'
+import CostReportCharts from './components/CostReportCharts.vue'
 import { useFmsStore } from '@/views/fms/store/fms'
 import { formatAmount } from '@/views/fms/utils/format'
 import dayjs from 'dayjs'
