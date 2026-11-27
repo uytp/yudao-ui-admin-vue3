@@ -29,7 +29,7 @@
           v-if="!generated"
           v-hasPermi="['fms:cost:generate']"
           type="success"
-          :disabled="!sheet.id"
+          :disabled="!sheet.id || unallocatedAmount > 0.005"
           @click="handleGenerate"
         >
           <Icon icon="ep:document-checked" class="mr-5px" /> 生成凭证
@@ -59,6 +59,14 @@
       show-icon
       :closable="false"
       :title="w"
+    />
+    <el-alert
+      v-if="unallocatedAmount > 0.005"
+      class="mb-10px"
+      type="warning"
+      show-icon
+      :closable="false"
+      :title="`本期制造费用 ${formatAmount(sheet.overheadTotal)} 元，只分摊了 ${formatAmount(allocatedTotal)} 元：请在下表填写各产品的【${allocBaseLabel}】后，再点【计算成本】。分摊完才能生成凭证。`"
     />
     <el-alert
       v-if="!sheet.id"
@@ -176,6 +184,15 @@ const setting = ref<Partial<FmsCostSettingVO>>({ overheadAllocMethod: 1, wipMeth
 const sheet = ref<FmsCostSheetVO>(emptySheet())
 const rows = computed(() => sheet.value.items)
 const generated = computed(() => sheet.value.status === FMS_COST_SHEET_STATUS.GENERATED)
+/** 已经分摊到各产品的制造费用合计 */
+const allocatedTotal = computed(() =>
+  sheet.value.items.reduce((total, item) => total + Number(item.allocOverhead || 0), 0)
+)
+/** 还没分摊的制造费用（大于 0 说明需要先填分摊依据） */
+const unallocatedAmount = computed(() => Number(sheet.value.overheadTotal || 0) - allocatedTotal.value)
+const allocBaseLabel = computed(
+  () => ({ 1: '完工数量', 2: '生产工时', 3: '直接人工', 4: '直接成本' })[setting.value.overheadAllocMethod || 1]
+)
 
 function emptySheet(): FmsCostSheetVO {
   return { accountSetId: 0, period: '', status: 0, overheadTotal: 0, items: [], warnings: [] }
