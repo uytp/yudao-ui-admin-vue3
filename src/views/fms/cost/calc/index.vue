@@ -319,7 +319,16 @@ function beginLocked(row: FmsCostSheetItemVO) {
 
 /** 一行有没有任何数据：没有就可以移除 */
 function isEmptyRow(row: FmsCostSheetItemVO) {
-  return !row.beginCarried && !Number(row.curMaterial || 0) && !Number(row.curLabor || 0)
+  return (
+    !row.beginCarried &&
+    !Number(row.curMaterial || 0) &&
+    !Number(row.curLabor || 0) &&
+    !Number(row.beginWipMaterial || 0) &&
+    !Number(row.beginWipLabor || 0) &&
+    !Number(row.beginWipOverhead || 0) &&
+    !Number(row.beginStockQty || 0) &&
+    !Number(row.beginStockAmount || 0)
+  )
 }
 
 /** 移除一个空产品行 */
