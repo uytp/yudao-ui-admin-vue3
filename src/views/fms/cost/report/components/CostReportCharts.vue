@@ -112,7 +112,7 @@ const unitCostOptions = computed<EChartsOption>(() => {
     grid: { left: 16, right: 24, top: 48, bottom: 12, containLabel: true },
     legend: { top: 0 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => (value === undefined || value === null ? '-' : formatUnitCost(value)) },
-    xAxis: { type: 'category', boundaryGap: months.length <= 1, data: months },
+    xAxis: { type: 'category', boundaryGap: true, data: months },
     yAxis: { type: 'value', scale: true },
     series: Array.from(products.entries()).map(([productItemId, name]) => ({
       name,
