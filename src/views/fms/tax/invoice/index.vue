@@ -280,13 +280,14 @@ async function loadList() {
   }
 }
 
-/** 合计只算“正常”的发票，销项进项分开会混在一起，所以只在选了方向时才有意义；这里都算，按正负号区分不了，就只合计金额税额 */
+/** 合计只算“正常”的发票；销项和进项加在一起没有意义，所以必须先选了方向才显示合计 */
 function summaryMethod({ columns, data }: { columns: any[]; data: FmsInvoiceVO[] }) {
   const normal = data.filter((r) => r.status !== 1)
   const sum = (key: keyof FmsInvoiceVO) =>
     formatAmount(normal.reduce((total, r) => total + Number(r[key] || 0), 0))
   return columns.map((column, index) => {
     if (index === 0) return '合计'
+    if (!query.direction) return index === 1 ? '选了方向才显示合计' : ''
     if (column.label === '不含税金额') return sum('amount')
     if (column.label === '税额') return sum('taxAmount')
     if (column.label === '价税合计') return sum('totalAmount')
